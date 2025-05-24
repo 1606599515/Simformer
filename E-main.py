@@ -7,6 +7,8 @@ import gc
 import argparse
 from tqdm import tqdm
 
+from fvcore.nn import FlopCountAnalysis
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -19,45 +21,42 @@ def set_seed(seed):
 
 
 def get_arguments():
-    parser = argparse.ArgumentParser(description='Training for Beam Datasets.')
+    parser = argparse.ArgumentParser(description='Training for Elasticity Datasets.')
 
     parser.add_argument('--seed', type=int, default=0, help='Random seed.')
 
     if os.path.exists(os.path.join('data')):
-        parser.add_argument('--data_path', default=os.path.join('data'), type=str,
+        parser.add_argument('--data_path', default=os.path.join('E:\\', 'Project', 'Elasticity', 'data'), type=str,
                             help='Root directory of the dataset.')
     else:
-        parser.add_argument('--data_path', default='/root/autodl-fs/beam', type=str,
+        parser.add_argument('--data_path', default='/root/autodl-fs/Elasticity', type=str,
                             help='Root directory of the dataset.')
 
     parser.add_argument('--model_name', type=str, default=None, help='Model name.')
     parser.add_argument('--hidden_dim', type=int, default=128, help='Hidden dimension of the model.')
     parser.add_argument('--num_layers', type=int, default=2, help='Number of MLP layers in the model.')
-
     parser.add_argument('--input_dim_edge', type=int, default=3, help='Position feature size.')
     parser.add_argument('--output_dim', type=int, default=1, help='Output feature size.')
-    parser.add_argument('--input_dim_node', type=int, default=4, help='Node feature size.')
+    parser.add_argument('--input_dim_node', type=int, default=2, help='Node feature size.')
 
     parser.add_argument('--num_clusters', type=int, default=64, help='Number of clusters.')
     parser.add_argument('--message_passing_steps', type=int, default=5, help='Number of message passing steps.')
     parser.add_argument('--transformer_block', type=int, default=5, help='Message dimension.')
-    parser.add_argument('--link_coefficient', type=float, default=0.00, help='Coefficient for link loss.')
-    parser.add_argument('--entropy_coefficient', type=float, default=0.00, help='Coefficient for link loss.')
 
     parser.add_argument('--apply_noise', type=bool, default=True, help='Whether to apply noise.')
     parser.add_argument('--noise', type=float, default=2e-2, help='Noise level.')
 
-    parser.add_argument('--batch_size', type=int, default=4, help='Batch size.')
+    parser.add_argument('--batch_size', type=int, default=1, help='Batch size.')
     parser.add_argument('--num_workers', type=int, default=1, help='Number of workers.')
 
-    parser.add_argument('--num_epochs', type=int, default=1000, help='Number of epochs to train. If epoch==0, test')
+    parser.add_argument('--num_epochs', type=int, default=0, help='Number of epochs to train. If epoch==0, test')
 
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate.')
     parser.add_argument('--decayRate', type=float, default=0.99999, help='Decay rate for learning rate.')
 
     parser.add_argument('--save_epoch', type=int, default=10, help='Number of steps between saving the model.')
-    parser.add_argument('--ckpt_root', type=str, default='ckpt-beam', help='Directory to save checkpoints.')
-    parser.add_argument('--result_root', type=str, default='result-beam', help='Save Results.')
+    parser.add_argument('--ckpt_root', type=str, default='ckpt-e', help='Directory to save checkpoints.')
+    parser.add_argument('--result_root', type=str, default='result-e', help='Save Results.')
 
     return parser.parse_args()
 
@@ -104,7 +103,7 @@ def train(model, data_loader, criterion, optimizer, scheduler, device, num_epoch
         model.load_state_dict(torch.load(f'{config.ckpt_root}/best_model.pth'))
         model = model.to(device)
         best_epoch = 0
-        best_loss, _ = validate(model, val_loader, criterion, device, best_epoch, config)
+        best_loss, _, _ = validate(model, val_loader, criterion, device)
 
     train_rmse_values = []
     valid_rmse_values = []
@@ -121,8 +120,7 @@ def train(model, data_loader, criterion, optimizer, scheduler, device, num_epoch
 
         start_time = time.time()
         total_loss = 0
-        total_link_loss = 0
-        total_entropy_loss = 0
+        total_var_loss = 0
         total_RMSE = 0
 
         for i, (batch, _, _) in enumerate(data_loader):
@@ -133,7 +131,7 @@ def train(model, data_loader, criterion, optimizer, scheduler, device, num_epoch
             mask = batch['mask'].to(device)  # [B, N]
             output = batch['output'].to(device)  # [B, N, 1]
 
-            output_hat, normalized_output, normalized_output_hat, link_loss, entropy_loss = model(pos,
+            output_hat, normalized_output, normalized_output_hat = model(pos,
                                                                          node,
                                                                          connections,
                                                                          output,
@@ -145,16 +143,14 @@ def train(model, data_loader, criterion, optimizer, scheduler, device, num_epoch
             mask = mask.unsqueeze(-1)
             costs = get_loss(output, output_hat, normalized_output, normalized_output_hat, mask, criterion)
             loss, RMSE = costs['loss'], costs['RMSE']
-            all_loss = loss + config.link_coefficient * link_loss + config.entropy_coefficient * entropy_loss
+
             optimizer.zero_grad()
-            all_loss.backward()
+            loss.backward()
 
             optimizer.step()
 
             total_loss += loss.item()
             total_RMSE += RMSE
-            total_link_loss += link_loss.item()
-            total_entropy_loss += entropy_loss.item()
 
             clear_memory()
 
@@ -168,8 +164,6 @@ def train(model, data_loader, criterion, optimizer, scheduler, device, num_epoch
 
         train_loss = total_loss / len(data_loader)
         total_RMSE = total_RMSE / len(data_loader)
-        avg_link_loss = total_link_loss / len(data_loader)
-        avg_entropy_loss = total_entropy_loss / len(data_loader)
 
         val_loss, val_RMSE = validate(model, val_loader, criterion, device, epoch, config)
 
@@ -180,8 +174,6 @@ def train(model, data_loader, criterion, optimizer, scheduler, device, num_epoch
             f"Epoch {epoch + 1}/{num_epochs}, "
             f"Train Loss: {train_loss:.6f}, "
             f"Train RMSE: {total_RMSE:.6f}, "
-            f"Link Loss: {avg_link_loss:.6f}, "
-            f"Entropy Loss: {avg_entropy_loss:.6f}, "
             f"Validation Loss: {val_loss:.6f}, "
             f"Validation RMSE: {val_RMSE:.6f}, "
             f"Time: {epoch_time:.2f}s"
@@ -224,7 +216,7 @@ def validate(model, data_loader, criterion, device, epoch, config):
             mask = batch['mask'].to(device)  # [B, N]
             output = batch['output'].to(device)  # [B, N, 1]
 
-            output_hat, normalized_output, normalized_output_hat, _, _ = model(pos,
+            output_hat, normalized_output, normalized_output_hat = model(pos,
                                                                          node,
                                                                          connections,
                                                                          output,
@@ -266,7 +258,7 @@ def test(model, data_loader, criterion, device, epoch, config):
             mask = batch['mask'].to(device)  # [B, N]
             output = batch['output'].to(device)  # [B, N, 1]
 
-            output_hat, normalized_output, normalized_output_hat, _, _ = model(pos,
+            output_hat, normalized_output, normalized_output_hat = model(pos,
                                                                          node,
                                                                          connections,
                                                                          output,
@@ -315,12 +307,19 @@ if __name__ == '__main__':
 
     set_seed(config.seed)
 
-    train_dataset = BeamDataset(data_path=config.data_path, mode='train')
-    valid_dataset = BeamDataset(data_path=config.data_path, mode='valid')
-    test_dataset = BeamDataset(data_path=config.data_path, mode='test')
+    train_dataset = ElasticityDataset(data_path=config.data_path, mode='train')
+    flops_dataset = ElasticityDataset(data_path=config.data_path, mode='train')
+    valid_dataset = ElasticityDataset(data_path=config.data_path, mode='valid')
+    test_dataset = ElasticityDataset(data_path=config.data_path, mode='test')
 
     train_loader = DataLoader(train_dataset,
                               batch_size=config.batch_size,
+                              shuffle=True,
+                              drop_last=True,
+                              pin_memory=True,
+                              collate_fn=collate_fn)
+    flops_loader = DataLoader(flops_dataset,
+                              batch_size=1,
                               shuffle=True,
                               drop_last=True,
                               pin_memory=True,
@@ -350,6 +349,30 @@ if __name__ == '__main__':
     model = model.to(device)
     if torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
+
+    for i, batch in enumerate(flops_loader):
+        if i == 0:
+            dummy_batch = batch[0]
+            break
+
+    dummy_pos = dummy_batch['pos'].to(device)  # [B, N, 2]
+    dummy_node = dummy_batch['node'].to(device)  # [B, N, input_dim_node]
+    dummy_connections = dummy_batch['connections'].to(device)  # [B, E, 2]
+    dummy_output = dummy_batch['output'].to(device)  # [B, N, 1]
+    dummy_mask = dummy_batch['mask'].to(device)  # [B, N]
+
+    class WrappedModel(torch.nn.Module):
+        def __init__(self, model):
+            super(WrappedModel, self).__init__()
+            self.model = model
+
+        def forward(self, pos, node, connections, output, mask):
+            return self.model(pos, node, connections, output, mask=mask, noise=False, mode='test')[0]
+
+    wrapped_model = WrappedModel(model)
+
+    flops = FlopCountAnalysis(wrapped_model, (dummy_pos, dummy_node, dummy_connections, dummy_output, dummy_mask))
+    print(f"Total FLOPs: {flops.total() / 1e9:.4f} GFLOPs")
 
     if config.num_epochs > 0:
         best_epoch = train(model,
