@@ -40,8 +40,8 @@ We evaluate SimFormer on:
 
 - Beam
 - SteeringWheel
-- Elasticity
-- DrivAerNet
+- [Elasticity](https://drive.google.com/drive/folders/1cznHmQO-hB_VlWOfh7IFpjsPVOYyghGJ)
+- [DrivAerNet](https://github.com/Mohamedelrefaie/DrivAerNet)
 
 ## 🧪 Training & Evaluation
 
