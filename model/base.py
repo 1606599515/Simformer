@@ -50,7 +50,6 @@ class GraphNetBlock(nn.Module):
         senders = senders.unsqueeze(2).expand(-1, -1, self.hidden_dim)
         receivers = receivers.unsqueeze(2).expand(-1, -1, self.hidden_dim)
 
-        # 检查索引是否超出范围
         if senders.max().item() >= sender_node_features.shape[1] or receivers.max().item() >= sender_node_features.shape[1]:
             raise ValueError("Index out of bound in senders or receivers")
 

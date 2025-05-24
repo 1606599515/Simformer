@@ -21,10 +21,8 @@ def set_seed(seed):
 def get_arguments():
     parser = argparse.ArgumentParser(description='Training for Beam Datasets.')
 
-    # 随机数种子
     parser.add_argument('--seed', type=int, default=0, help='Random seed.')
 
-    # 数据集位置
     if os.path.exists(os.path.join('data')):
         parser.add_argument('--data_path', default=os.path.join('data'), type=str,
                             help='Root directory of the dataset.')
@@ -32,7 +30,6 @@ def get_arguments():
         parser.add_argument('--data_path', default='/root/autodl-fs/beam', type=str,
                             help='Root directory of the dataset.')
 
-    # 模型
     parser.add_argument('--model_name', type=str, default=None, help='Model name.')
     parser.add_argument('--hidden_dim', type=int, default=128, help='Hidden dimension of the model.')
     parser.add_argument('--num_layers', type=int, default=2, help='Number of MLP layers in the model.')
@@ -47,22 +44,17 @@ def get_arguments():
     parser.add_argument('--link_coefficient', type=float, default=0.00, help='Coefficient for link loss.')
     parser.add_argument('--entropy_coefficient', type=float, default=0.00, help='Coefficient for link loss.')
 
-    # 其他参数
     parser.add_argument('--apply_noise', type=bool, default=True, help='Whether to apply noise.')
     parser.add_argument('--noise', type=float, default=2e-2, help='Noise level.')
 
-    # 批处理
     parser.add_argument('--batch_size', type=int, default=4, help='Batch size.')
     parser.add_argument('--num_workers', type=int, default=1, help='Number of workers.')
 
-    # 训练
     parser.add_argument('--num_epochs', type=int, default=1000, help='Number of epochs to train. If epoch==0, test')
 
-    # 学习率
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate.')
     parser.add_argument('--decayRate', type=float, default=0.99999, help='Decay rate for learning rate.')
 
-    # 评估和保存
     parser.add_argument('--save_epoch', type=int, default=10, help='Number of steps between saving the model.')
     parser.add_argument('--ckpt_root', type=str, default='ckpt-beam', help='Directory to save checkpoints.')
     parser.add_argument('--result_root', type=str, default='result-beam', help='Save Results.')
@@ -71,23 +63,11 @@ def get_arguments():
 
 
 def get_loss(output, output_hat, normalized_output, normalized_output_hat, mask, criterion):
-    '''
-    :param output: [B, N, 1]
-    :param output_hat: [B, N, 1]
-    :param normalized_output: [B, N, 1]
-    :param normalized_output_hat: [B, N, 1]
-    :param mask: [B, N, 1]
-    :param criterion: 损失函数
-    :param config: 配置参数
-    :return: 损失字典
-    '''
-    # 计算 RMSE
+
     rmse = torch.sqrt(((output * mask - output_hat * mask) ** 2).mean() * mask.numel() / mask.sum())
 
-    # 计算损失
     normalized_loss = criterion(normalized_output * mask, normalized_output_hat * mask) * mask.numel() / mask.sum()
 
-    # 返回损失字典
     losses = {
         'RMSE': rmse,
         'loss': normalized_loss
@@ -120,7 +100,6 @@ def train(model, data_loader, criterion, optimizer, scheduler, device, num_epoch
 
     set_seed(config.seed)
 
-    # 如果有best_model,就预加载，否则从头开始训练
     if os.path.exists(f'{config.ckpt_root}/best_model.pth'):
         model.load_state_dict(torch.load(f'{config.ckpt_root}/best_model.pth'))
         model = model.to(device)
@@ -154,9 +133,6 @@ def train(model, data_loader, criterion, optimizer, scheduler, device, num_epoch
             mask = batch['mask'].to(device)  # [B, N]
             output = batch['output'].to(device)  # [B, N, 1]
 
-            # output_hat:预测的output
-            # normalized_output: 归一化后的output
-            # normalized_output_hat: 归一化后的output_hat
             output_hat, normalized_output, normalized_output_hat, link_loss, entropy_loss = model(pos,
                                                                          node,
                                                                          connections,
@@ -182,7 +158,6 @@ def train(model, data_loader, criterion, optimizer, scheduler, device, num_epoch
 
             clear_memory()
 
-        # 保存模型
         if (epoch + 1) % config.save_epoch == 0:
             torch.save(model.state_dict(), f'{config.ckpt_root}/{epoch + 1}.pth')
 
@@ -249,7 +224,6 @@ def validate(model, data_loader, criterion, device, epoch, config):
             mask = batch['mask'].to(device)  # [B, N]
             output = batch['output'].to(device)  # [B, N, 1]
 
-            # 模型前向传播
             output_hat, normalized_output, normalized_output_hat, _, _ = model(pos,
                                                                          node,
                                                                          connections,
@@ -258,7 +232,6 @@ def validate(model, data_loader, criterion, device, epoch, config):
                                                                          noise=False,
                                                                          mode='validate')
 
-            # 计算损失
             mask = mask.unsqueeze(-1)
             costs = get_loss(output, output_hat, normalized_output, normalized_output_hat, mask, criterion)
             loss, RMSE = costs['loss'], costs['RMSE']
@@ -266,7 +239,6 @@ def validate(model, data_loader, criterion, device, epoch, config):
             total_loss += loss.item()
             total_RMSE += RMSE
 
-            # 清理内存
             clear_memory()
 
     val_loss = total_loss / len(data_loader)
@@ -303,7 +275,6 @@ def test(model, data_loader, criterion, device, epoch, config):
                                                                          noise=False,
                                                                          mode='test')
 
-            # 计算损失
             mask = mask.unsqueeze(-1)
             costs = get_loss(output, output_hat, normalized_output, normalized_output_hat, mask, criterion)
             loss, RMSE = costs['loss'], costs['RMSE']
@@ -311,14 +282,12 @@ def test(model, data_loader, criterion, device, epoch, config):
             total_loss += loss.item()
             total_RMSE += RMSE
 
-            # 保存预测结果
             for b in range(output_hat.shape[0]):
                 valid_nodes = mask[b].bool()
                 np.savez(f'{config.result_root}/{path[b]}',
                          prediction=output_hat[b, valid_nodes].detach().cpu().numpy(),
                          groundtruth=output[b, valid_nodes].cpu().numpy())
 
-            # 清理内存
             clear_memory()
 
     test_loss = total_loss / len(data_loader)
@@ -345,7 +314,6 @@ def count_parameters(model):
 if __name__ == '__main__':
     config = get_arguments()
 
-    # 设置随机种子
     set_seed(config.seed)
 
     train_dataset = BeamDataset(data_path=config.data_path, mode='train')
@@ -379,7 +347,6 @@ if __name__ == '__main__':
 
     criterion = torch.nn.MSELoss()
 
-    # 将模型和数据迁移到 GPU（如果可用）
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     if torch.cuda.device_count() > 1:
