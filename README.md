@@ -17,7 +17,6 @@ SimFormer is a transformer-based framework for mesh-based physical simulation. I
 - ✅ **Superior accuracy and efficiency** across four benchmarks
 
 ![Framework](assets/Framework.png)
-![Visualizations](assets/visualizations.png)
 ---
 
 ## 📦 Installation
@@ -52,3 +51,6 @@ python Beam-main.py --num_epochs=1000
 python Beam-main.py --num_epochs=0
 ```
 
+## 🎨 Visualizations
+
+![Visualizations](assets/visualizations.png)
