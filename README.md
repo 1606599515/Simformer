@@ -3,7 +3,7 @@ This repository contains the official PyTorch implementation of the paper:
 
 > **SimFormer: A Multiscale Transformer Framework with Learnable Clustering for Mesh-based Simulation**  
 > Anonymous author(s)  
-> *Under Review / CIKM, 2025*
+> *CIKM, 2025*
 > 
 ---
 
