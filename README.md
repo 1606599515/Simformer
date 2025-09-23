@@ -44,7 +44,3 @@ We evaluate SimFormer on:
 python Beam-main.py --num_epochs=1000
 python Beam-main.py --num_epochs=0
 ```
-
-## 🎨 Visualizations
-
-![Visualizations](assets/visualizations.png)
