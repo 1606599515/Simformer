@@ -292,8 +292,9 @@ class Ours(nn.Module):
 
         node_features, all_clustering_weights = self.transformer_process(node_features, mask)
 
-        adj = generate_adjacency_matrix(connections, node_features.shape[1], mask)
-        link_loss = compute_loss(adj, all_clustering_weights)
+        # adj = generate_adjacency_matrix(connections, node_features.shape[1], mask)
+        # link_loss = compute_loss(adj, all_clustering_weights)
+        link_loss = 0
         entropy_loss =entropy_regularization(all_clustering_weights)
 
         normalized_output_hat = self.decoder(node_features)
