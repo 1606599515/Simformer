@@ -238,7 +238,7 @@ class Ours(nn.Module):
         self.transformer_process = TransformerProcess(config.hidden_dim, config.num_layers, config.transformer_block, config.num_clusters)
         self.decoder = Decoder(config.hidden_dim, config.output_dim, config.num_layers)
 
-    def accumulate(self, node, pos, connections, output):
+    def accumulate(self, node, pos, connections, output, supervision_mask=None):
         self.node_normalizer.accumulate(node)
 
         senders, receivers = connections[..., 0], connections[..., 1]  # [B, E]
@@ -249,7 +249,12 @@ class Ours(nn.Module):
 
         edge = torch.cat([edge_displacement, edge_distance], dim=-1)  # [B, E, 3]
         self.edge_normalizer.accumulate(edge)
-        self.output_normalizer.accumulate(output)
+        if supervision_mask is not None:
+            valid_output = output[supervision_mask.bool()]
+            if valid_output.numel() > 0:
+                self.output_normalizer.accumulate(valid_output.reshape(-1, output.size(-1)))
+        else:
+            self.output_normalizer.accumulate(output)
 
     def output_normalize(self, data):
         return self.output_normalizer(data)
@@ -303,6 +308,5 @@ class Ours(nn.Module):
         output_hat = self.output_normalize_inverse(normalized_output_hat)
 
         return output_hat, normalized_output, normalized_output_hat, link_loss, entropy_loss
-
 
 

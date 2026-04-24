@@ -19,12 +19,14 @@ def collate_fn(batch):
     padded_node = []
     padded_connections = []
     padded_mask = []
+    padded_supervision_mask = []
     padded_output = []
 
     for data, idx, path in batch:
         pos = data['pos']
         node = data['node']
         connections = data['connections']
+        supervision_mask = data['supervision_mask']
         output = data['output']
 
         current_node_num = pos.shape[0]
@@ -34,6 +36,7 @@ def collate_fn(batch):
         pos = torch.cat([pos, torch.zeros((pad_size, pos.shape[1]))], dim=0)
         node = torch.cat([node, torch.zeros((pad_size, node.shape[1]))], dim=0)
         output = torch.cat([output, torch.zeros((pad_size, output.shape[1]))], dim=0)
+        supervision_mask = torch.cat([supervision_mask, torch.zeros(pad_size)], dim=0)
 
         # Pad edges
         edge_pad_size = max_edges - connections.shape[0]
@@ -47,6 +50,7 @@ def collate_fn(batch):
         padded_connections.append(connections)
         padded_output.append(output)
         padded_mask.append(mask)
+        padded_supervision_mask.append(supervision_mask)
 
     # Stack all padded data
     batch_pos = torch.stack(padded_pos)
@@ -54,12 +58,14 @@ def collate_fn(batch):
     batch_connections = torch.stack(padded_connections)
     batch_output = torch.stack(padded_output)
     batch_mask = torch.stack(padded_mask)
+    batch_supervision_mask = torch.stack(padded_supervision_mask)
 
     return dict(pos=batch_pos,
                 node=batch_node,
                 output=batch_output,
                 connections=batch_connections,
-                mask=batch_mask), [idx for _, idx, _ in batch], [path for _, _, path in batch]
+                mask=batch_mask,
+                supervision_mask=batch_supervision_mask), [idx for _, idx, _ in batch], [path for _, _, path in batch]
 
 
 def cluster_collate_fn(batch):
@@ -72,6 +78,7 @@ def cluster_collate_fn(batch):
     padded_node = []
     padded_connections = []
     padded_mask = []
+    padded_supervision_mask = []
     padded_output = []
     padded_cluster = []
 
@@ -79,6 +86,7 @@ def cluster_collate_fn(batch):
         pos = data['pos']
         node = data['node']
         connections = data['connections']
+        supervision_mask = data['supervision_mask']
         output = data['output']
         cluster_matrix = data['cluster_matrix']
 
@@ -90,6 +98,7 @@ def cluster_collate_fn(batch):
         node = torch.cat([node, torch.zeros((pad_size, node.shape[1]))], dim=0)
         output = torch.cat([output, torch.zeros((pad_size, output.shape[1]))], dim=0)
         cluster_matrix = torch.cat([cluster_matrix, torch.zeros((pad_size, cluster_matrix.shape[1]))], dim=0)
+        supervision_mask = torch.cat([supervision_mask, torch.zeros(pad_size)], dim=0)
 
         # Pad edges
         edge_pad_size = max_edges - connections.shape[0]
@@ -103,6 +112,7 @@ def cluster_collate_fn(batch):
         padded_connections.append(connections)
         padded_output.append(output)
         padded_mask.append(mask)
+        padded_supervision_mask.append(supervision_mask)
         padded_cluster.append(cluster_matrix)
 
     # Stack all padded data
@@ -111,6 +121,7 @@ def cluster_collate_fn(batch):
     batch_connections = torch.stack(padded_connections)
     batch_output = torch.stack(padded_output)
     batch_mask = torch.stack(padded_mask)
+    batch_supervision_mask = torch.stack(padded_supervision_mask)
     batch_cluster = torch.stack(padded_cluster)
 
     return dict(pos=batch_pos,
@@ -118,6 +129,7 @@ def cluster_collate_fn(batch):
                 output=batch_output,
                 connections=batch_connections,
                 mask=batch_mask,
+                supervision_mask=batch_supervision_mask,
                 cluster_matrix=batch_cluster), [idx for _, idx, _ in batch], [path for _, _, path in batch]
 
 
@@ -132,10 +144,14 @@ def get_beam_data(path):
     border = data['border']
     constraint = data['constraint']
     load = data['load']
+    if 'supervision_mask' in data:
+        supervision_mask = np.asarray(data['supervision_mask'], dtype=np.float32).reshape(-1)
+    else:
+        supervision_mask = np.ones(pos.shape[0], dtype=np.float32)
 
     node = np.concatenate((border, constraint, load), axis=1)
 
-    return pos, node, connections, output
+    return pos, node, connections, output, supervision_mask
 
 
 class BeamDataset(Dataset):
@@ -155,7 +171,7 @@ class BeamDataset(Dataset):
 
     def __getitem__(self, idx):
         path = os.path.join(self.data_path, '%d.npz' % self.data[idx])
-        pos, node, connections, output = get_beam_data(path)
+        pos, node, connections, output, supervision_mask = get_beam_data(path)
         # pos [N, 2]
         # node [N, 4]
         # connections [E, 2]
@@ -172,10 +188,12 @@ class BeamDataset(Dataset):
 
         # output [N, 1]
         output = torch.from_numpy(output).float()
+        supervision_mask = torch.from_numpy(supervision_mask).float()
 
         return dict(pos=pos,
                     node=node,
                     connections=connections,
+                    supervision_mask=supervision_mask,
                     output=output), idx, self.data[idx]
 
 
@@ -260,7 +278,7 @@ class ClusterDataset(Dataset):
 
     def __getitem__(self, idx):
         path = os.path.join(self.data_path, '%d.npz' % self.data[idx])
-        pos, node, connections, output = get_beam_data(path)
+        pos, node, connections, output, supervision_mask = get_beam_data(path)
         # pos [N, 2]
         # node [N, 4]
         # connections [E, 2]
@@ -275,6 +293,7 @@ class ClusterDataset(Dataset):
 
         # output [N, 1]
         output = torch.from_numpy(output).float()
+        supervision_mask = torch.from_numpy(supervision_mask).float()
 
         cluster_path = os.path.join(self.data_path, self.config.clustering_methods, str(self.config.num_clusters))
         if not os.path.exists(cluster_path):
@@ -309,6 +328,7 @@ class ClusterDataset(Dataset):
         return dict(pos=pos,
                     node=node,
                     connections=connections,
+                    supervision_mask=supervision_mask,
                     cluster_matrix=cluster_matrix,
                     output=output), idx, self.data[idx]
 
@@ -498,4 +518,3 @@ if __name__ == '__main__':
 
     average_edges = total_edges / num_samples
     print(f"average edges: {average_edges:.2f}")
-
